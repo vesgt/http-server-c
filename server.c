@@ -1,3 +1,4 @@
+#include <string.h>
 #include <unistd.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -75,7 +76,32 @@ int main(void) {
     println("Waiting for connections...");
     socklen_t addr_size = sizeof(addr);
     while (1) {
-        accept(socket_fd, (struct sockaddr *)&addr, &addr_size);
+        int client_fd = accept(socket_fd, (struct sockaddr *)&addr, &addr_size);
+
+        char buffer[4096];
+        ssize_t recieved_bytes = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
+
+        buffer[recieved_bytes] = '\0';
+        println("Recieved request: %s", buffer);
+
+        char *response =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: 12\r\n"
+            "\r\n"
+            "Hello World!";
+
+        println("Sending response: %s", response);
+
+        int send_res = send(client_fd, response, strlen(response), 0);
+
+        if(send_res < 0) {
+            perror("send");
+            println("send failed");
+            return 1;
+        }
+
+        println("send success!");
     }
 
     return 0;
