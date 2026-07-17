@@ -33,8 +33,13 @@ struct http_request {
   size_t body_len;
 };
 
+struct span {
+    char *ptr;
+    size_t len;
+};
+
 struct route_param {
-    char *key;
+    struct span key;
     char *value;
 };
 
@@ -158,17 +163,93 @@ void parse_http_request(struct http_request *request) {
     }
 }
 
-void route_request(struct http_request *request, struct route_table *route_table) {
-    char *rq_ptr = request->path; // points to the current /, when we fail to find another / we set it to null
-    while(rq_ptr != NULL) {
-        char *seg_end = strchr(rq_ptr, '/');
-        if(seg_end != NULL) {
-            *seg_end = '\0'; // Assign the / as end of string instead. This would cause reading from rq_ptr to read 1 segment.
-        } // If the seg_end == NULL, that means there are no more slashes, so we read to end for this segmen
+char *params_get(struct route_params *params, const char *key) {
+    size_t key_len = strlen(key);
+    for(int i = 0; i < params->count; i++) {
+        if(params->route_params[i].key.len == key_len && strncmp(params->route_params[i].key.ptr, key, params->route_params[i].key.len) == 0) {
+            return params->route_params[i].value;
+        }
+    }
 
+    return NULL;
+}
 
+struct span is_dynamic_part(char *ptr) {
+    size_t len_to_sep = strcspn(ptr, "/");
 
-        rq_ptr = seg_end;
+    struct span dynamic_part = {0};
+    if(len_to_sep >= 2 && ptr[0] == '{' && ptr[len_to_sep - 1] == '}') {
+        dynamic_part.ptr = ptr + 1;
+        dynamic_part.len = len_to_sep - 2;
+        return dynamic_part;
+    }
+
+    dynamic_part.ptr = NULL;
+    return dynamic_part;
+}
+
+void init_route_params(struct route_params *params, char *request_path, char *route_path) {
+    while (*request_path != '\0' && *route_path != '\0') {
+        int request_len_to_sep = strcspn(request_path, "/");
+        int route_len_to_sep = strcspn(route_path, "/");
+
+        char request_sep = request_path[request_len_to_sep];
+
+        struct span dynamic_part = is_dynamic_part(route_path);
+        if(dynamic_part.ptr != NULL) {
+            params->route_params[params->count].key = dynamic_part;
+
+            *(request_path + request_len_to_sep) = '\0';
+            params->route_params[params->count].value = request_path;
+
+            params->count++;
+        }
+
+        request_path += request_len_to_sep;
+        route_path += route_len_to_sep;
+
+        if(request_sep == '/')
+            request_path++;
+
+        if(*route_path == '/')
+            route_path++;
+    }
+}
+
+void route_request(struct http_request *request, struct route_table *route_table, int client_fd) {
+    for(int i = 0; i < route_table->count; i++) {
+        char *rt_method_ptr = route_table->routes[i].method;
+        char *rq_method_ptr = request->method;
+
+        if(strcmp(rt_method_ptr, rq_method_ptr) != 0)
+            continue;
+
+        char *rt_path_ptr = route_table->routes[i].path + 1;
+        char *rq_path_ptr = request->path + 1; // + 1 on both skips over the inital slash.
+        while(*rt_path_ptr != '\0' && *rq_path_ptr != '\0') {
+            int rt_len_to_sep = strcspn(rt_path_ptr, "/");
+            int rq_len_to_sep = strcspn(rq_path_ptr, "/");
+
+            if(is_dynamic_part(rt_path_ptr).ptr != NULL) {
+            } else if(rt_len_to_sep != rq_len_to_sep || strncmp(rq_path_ptr, rt_path_ptr, rt_len_to_sep) != 0) {
+                break;
+            }
+
+            rt_path_ptr += rt_len_to_sep;
+            rq_path_ptr += rq_len_to_sep;
+
+            if(*rt_path_ptr == '/')
+                rt_path_ptr++;
+
+            if(*rq_path_ptr == '/')
+                rq_path_ptr++;
+        }
+
+        if(*rt_path_ptr == '\0' && *rq_path_ptr == '\0') {
+            struct route_params params = {0};
+            init_route_params(&params, request->path, route_table->routes[i].path);
+            route_table->routes[i].handler(request, client_fd, params);
+        }
     }
 }
 
@@ -187,29 +268,7 @@ void handle_client(int client_fd, struct route_table *routing_table) {
     init_http_request(&request, buffer);
     parse_http_request(&request);
 
-    route_request(&request, routing_table);
-
-    char *response =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/plain\r\n"
-        "Content-Length: 12\r\n"
-        "\r\n"
-        "Hello World!";
-
-    println("Sending response: %s", response);
-
-    int send_res = send(client_fd, response, strlen(response), 0);
-
-    if(send_res < 0) {
-        perror("send");
-        println("send failed");
-    }
-
-    println("send success!");
-
-    close(client_fd);
-
-    println("closed client");
+    route_request(&request, routing_table, client_fd);
 }
 
 int register_route(struct route_table *route_table, char *method, char *path, route_handler handler_fn) {
@@ -236,14 +295,63 @@ int register_route(struct route_table *route_table, char *method, char *path, ro
     return 0;
 }
 
+void OK(int client_fd, char *content) {
+
+}
+
 void handle_get_root(struct http_request *request, int client_fd, struct route_params route_params) {
     println("Handling GET / request");
     // Implement the logic for handling GET / requests here
+    char *response =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/plain\r\n"
+        "Content-Length: 12\r\n"
+        "\r\n"
+        "Hello World!";
+
+    println("Sending response: %s", response);
+
+    int send_res = send(client_fd, response, strlen(response), 0);
+
+    if(send_res < 0) {
+        perror("send");
+        println("send failed");
+    }
+
+    println("send success!");
+
+    close(client_fd);
+
+    println("closed client");
 }
 
 void handle_get_user(struct http_request *request, int client_fd, struct route_params route_params) {
     println("Handling GET /users/{id} request");
     // Implement the logic for handling GET /users/{id} requests here
+    char *user_id_ptr = params_get(&route_params, "id");
+    int user_id = atoi(user_id_ptr);
+    println("%d", user_id);
+    char *response =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/plain\r\n"
+        "Content-Length: 11\r\n"
+        "\r\n"
+        "/users/{id}";
+
+    println("Sending response: %s", response);
+
+    int send_res = send(client_fd, response, strlen(response), 0);
+
+    if(send_res < 0) {
+        perror("send");
+        println("send failed");
+    }
+
+    println("send success!");
+
+    close(client_fd);
+
+    println("closed client");
 }
 
 int main(void) {

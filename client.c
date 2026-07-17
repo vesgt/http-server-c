@@ -52,7 +52,7 @@ int main(void) {
     println("trying to send a request");
 
     const char *request =
-        "GET / HTTP/1.1\r\n"
+        "GET /users/42 HTTP/1.1\r\n"
         "HOST: localhost:8080\r\n"
         "\r\n";
 
