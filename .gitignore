@@ -34,3 +34,8 @@ a.out
 
 # Dependency files
 *.d
+
+client
+server
+
+.vscode
