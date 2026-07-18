@@ -111,6 +111,15 @@ int bind_socket(int socket_fd, struct sockaddr_in *socket_addr) {
     return 0;
 }
 
+void send_all(int fd, const char *buffer) {
+    size_t tot_sent = 0;
+    size_t buffer_len = strlen(buffer);
+    while(tot_sent < buffer_len) {
+        ssize_t sent_bytes = send(fd, buffer + tot_sent, buffer_len - tot_sent, 0);
+        tot_sent += sent_bytes;
+    }
+}
+
 void init_http_request(struct http_request *request, char *buffer) {
     char *separator = strstr(buffer, "\r\n\r\n");
     char *body = separator + 4; // Skip the delimiter strstr uses.
@@ -245,7 +254,7 @@ void route_request(struct http_request *request, struct route_table *route_table
                 rq_path_ptr++;
         }
 
-        if(*rt_path_ptr == '\0' && *rq_path_ptr == '\0') {
+        if(*rt_path_ptr == '\0' && *rq_path_ptr == '\0') {
             struct route_params params = {0};
             init_route_params(&params, request->path, route_table->routes[i].path);
             route_table->routes[i].handler(request, client_fd, params);
@@ -296,62 +305,40 @@ int register_route(struct route_table *route_table, char *method, char *path, ro
 }
 
 void OK(int client_fd, char *content) {
+    char *headers;
+    int res = asprintf(&headers,
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/plain"
+        "Content-Length: %zu\r\n"
+        "Connection: close\r\n"
+        "\r\n",
+        strlen(content));
 
+    if(res < 0)
+        close(client_fd);
+
+    send_all(client_fd, headers);
+    send_all(client_fd, content);
+
+    close(client_fd);
 }
 
 void handle_get_root(struct http_request *request, int client_fd, struct route_params route_params) {
     println("Handling GET / request");
     // Implement the logic for handling GET / requests here
-    char *response =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/plain\r\n"
-        "Content-Length: 12\r\n"
-        "\r\n"
-        "Hello World!";
-
-    println("Sending response: %s", response);
-
-    int send_res = send(client_fd, response, strlen(response), 0);
-
-    if(send_res < 0) {
-        perror("send");
-        println("send failed");
-    }
-
-    println("send success!");
-
-    close(client_fd);
-
-    println("closed client");
+    OK(client_fd, "Hello MAN!!");
 }
 
 void handle_get_user(struct http_request *request, int client_fd, struct route_params route_params) {
     println("Handling GET /users/{id} request");
     // Implement the logic for handling GET /users/{id} requests here
     char *user_id_ptr = params_get(&route_params, "id");
-    int user_id = atoi(user_id_ptr);
-    println("%d", user_id);
-    char *response =
-        "HTTP/1.1 200 OK\r\n"
-        "Content-Type: text/plain\r\n"
-        "Content-Length: 11\r\n"
-        "\r\n"
-        "/users/{id}";
 
-    println("Sending response: %s", response);
+    OK(client_fd, user_id_ptr);
+}
 
-    int send_res = send(client_fd, response, strlen(response), 0);
-
-    if(send_res < 0) {
-        perror("send");
-        println("send failed");
-    }
-
-    println("send success!");
-
-    close(client_fd);
-
-    println("closed client");
+void handle_post_user(struct http_request *request, int client_fd, struct route_params route_params) {
+    OK(client_fd, "Created a new user!");
 }
 
 int main(void) {
@@ -381,6 +368,7 @@ int main(void) {
 
     register_route(&route_table, "GET", "/", handle_get_root);
     register_route(&route_table, "GET", "/users/{id}", handle_get_user);
+    register_route(&route_table, "POST", "/users", handle_post_user);
 
     println("Waiting for connections...");
     socklen_t addr_size = sizeof(addr);
