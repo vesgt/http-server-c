@@ -51,17 +51,6 @@ int bind_socket(int socket_fd, struct sockaddr_in *socket_addr) {
     return 0;
 }
 
-char *params_get(struct route_params *params, const char *key) {
-    size_t key_len = strlen(key);
-    for(int i = 0; i < params->count; i++) {
-        if(params->route_params[i].key.len == key_len && strncmp(params->route_params[i].key.ptr, key, params->route_params[i].key.len) == 0) {
-            return params->route_params[i].value;
-        }
-    }
-
-    return NULL;
-}
-
 void handle_client(int client_fd, struct route_table *routing_table) {
     char buffer[4096];
     ssize_t recieved_bytes = recv(client_fd, buffer, sizeof(buffer) - 1, 0);
@@ -102,13 +91,14 @@ int register_route(struct route_table *route_table, char *method, char *path, ro
     return 0;
 }
 
-void handle_get_root(struct http_request *request, int client_fd, struct route_params route_params) {
+void handle_get_root(struct http_request *request, int client_fd, struct params route_params, struct params query_params) {
     println("Handling GET / request");
     // Implement the logic for handling GET / requests here
-    OK(client_fd, "Hello MAN!!");
+    char *test_query_param = params_get(&query_params, "test");
+    OK(client_fd, "NOICE!!!!");
 }
 
-void handle_get_user(struct http_request *request, int client_fd, struct route_params route_params) {
+void handle_get_user(struct http_request *request, int client_fd, struct params route_params, struct params query_params) {
     println("Handling GET /users/{id} request");
     // Implement the logic for handling GET /users/{id} requests here
     char *user_id_ptr = params_get(&route_params, "id");
@@ -116,7 +106,7 @@ void handle_get_user(struct http_request *request, int client_fd, struct route_p
     NotFound(client_fd, user_id_ptr);
 }
 
-void handle_post_user(struct http_request *request, int client_fd, struct route_params route_params) {
+void handle_post_user(struct http_request *request, int client_fd, struct params route_params, struct params query_params) {
     OK(client_fd, "Created a new user!");
 }
 

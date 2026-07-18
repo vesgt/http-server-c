@@ -16,7 +16,7 @@ struct span is_dynamic_part(char *ptr) {
     return dynamic_part;
 }
 
-void init_route_params(struct route_params *params, char *request_path, char *route_path) {
+void init_route_params(struct params *params, char *request_path, char *route_path) {
     while (*request_path != '\0' && *route_path != '\0') {
         int request_len_to_sep = strcspn(request_path, "/");
         int route_len_to_sep = strcspn(route_path, "/");
@@ -25,10 +25,10 @@ void init_route_params(struct route_params *params, char *request_path, char *ro
 
         struct span dynamic_part = is_dynamic_part(route_path);
         if(dynamic_part.ptr != NULL) {
-            params->route_params[params->count].key = dynamic_part;
+            params->params[params->count].key = dynamic_part;
 
             *(request_path + request_len_to_sep) = '\0';
-            params->route_params[params->count].value = request_path;
+            params->params[params->count].value = request_path;
 
             params->count++;
         }
@@ -44,6 +44,32 @@ void init_route_params(struct route_params *params, char *request_path, char *ro
     }
 }
 
+void init_query_params(struct params *params, char *request_path) {
+    char *param_ptr = strchr(request_path, '?'); // ?text=cool&skibidi=toilet\r\n....\0
+    if (param_ptr == NULL)
+        return;
+    param_ptr++; //text=cool&skibidi=toilet HTTP/1.1\r\n....\0
+    while(*param_ptr != '\0') {
+        size_t len_to_next = strcspn(param_ptr, "&"); // 9, text=cool&skibidi=toilet
+        size_t len_to_eq = strcspn(param_ptr, "="); // 4, text=cool
+
+        params->params[params->count].key.ptr = param_ptr; // text=cool...
+        params->params[params->count].key.len = len_to_eq; // 4, combined: text
+
+        *(param_ptr + len_to_eq) = '\0'; // text=cool -> text\0cool
+        params->params[params->count].value = param_ptr + len_to_eq + 1; // t+5 -> text\0c
+
+        if(len_to_next != strlen(param_ptr) + strlen(params->params[params->count].value) + 1) { // if the length to next(& or \0) != length of the rest of string, we move forward by 1 more
+            // this is to move past the ampersand.
+            param_ptr += len_to_next + 1;
+        } else {
+            // otherwise we move to the end of the string, which means the param_ptr should equal \0 and quit the loop.
+            param_ptr += len_to_next;
+        }
+        params->count++;
+    }
+}
+
 void route_request(struct http_request *request, struct route_table *route_table, int client_fd) {
     for(int i = 0; i < route_table->count; i++) {
         char *rt_method_ptr = route_table->routes[i].method;
@@ -54,9 +80,15 @@ void route_request(struct http_request *request, struct route_table *route_table
 
         char *rt_path_ptr = route_table->routes[i].path + 1;
         char *rq_path_ptr = request->path + 1; // + 1 on both skips over the inital slash.
+
+        // remove eventual query params, (temporarily, remove the ending thingy afterward!)
+        char *question_mark_ptr = strchr(rq_path_ptr, '?');
+        if(question_mark_ptr != NULL)
+            *question_mark_ptr = '\0';
+
         while(*rt_path_ptr != '\0' && *rq_path_ptr != '\0') {
-            int rt_len_to_sep = strcspn(rt_path_ptr, "/");
-            int rq_len_to_sep = strcspn(rq_path_ptr, "/");
+            size_t rt_len_to_sep = strcspn(rt_path_ptr, "/");
+            size_t rq_len_to_sep = strcspn(rq_path_ptr, "/");
 
             if(is_dynamic_part(rt_path_ptr).ptr != NULL) {
             } else if(rt_len_to_sep != rq_len_to_sep || strncmp(rq_path_ptr, rt_path_ptr, rt_len_to_sep) != 0) {
@@ -74,9 +106,24 @@ void route_request(struct http_request *request, struct route_table *route_table
         }
 
         if(*rt_path_ptr == '\0' && *rq_path_ptr == '\0') {
-            struct route_params params = {0};
-            init_route_params(&params, request->path, route_table->routes[i].path);
-            route_table->routes[i].handler(request, client_fd, params);
+            struct params route_params = {0};
+            init_route_params(&route_params, request->path, route_table->routes[i].path);
+            if(question_mark_ptr != NULL)
+                *question_mark_ptr = '?';
+            struct params query_params = {0};
+            init_query_params(&query_params, request->path);
+            route_table->routes[i].handler(request, client_fd, route_params, query_params);
         }
     }
+}
+
+char *params_get(struct params *params, const char *key) {
+    size_t key_len = strlen(key);
+    for(int i = 0; i < params->count; i++) {
+        if(params->params[i].key.len == key_len && strncmp(params->params[i].key.ptr, key, params->params[i].key.len) == 0) {
+            return params->params[i].value;
+        }
+    }
+
+    return NULL;
 }

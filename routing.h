@@ -9,17 +9,17 @@ struct span {
     size_t len;
 };
 
-struct route_param {
+struct param {
     struct span key;
     char *value;
 };
 
-struct route_params {
-    struct route_param route_params[8];
+struct params {
+    struct param params[8];
     int count;
 };
 
-typedef void (*route_handler)(struct http_request *request, int client_fd, struct route_params route_params);
+typedef void (*route_handler)(struct http_request *request, int client_fd, struct params route_params, struct params query_params);
 
 struct route {
     char *method;
@@ -33,7 +33,8 @@ struct route_table {
     int count;
 };
 
-void init_route_params(struct route_params *params, char *request_path, char *route_path);
+void init_route_params(struct params *params, char *request_path, char *route_path);
 void route_request(struct http_request *request, struct route_table *route_table, int client_fd);
+char *params_get(struct params *params, const char *key);
 
 #endif
